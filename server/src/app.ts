@@ -1,28 +1,45 @@
-import express = require("express");
-import puppeteer = require("puppeteer");
-import geocoder = require("./geocoder");
+import express from "express";
+import puppeteer from "puppeteer-core";
 const uuid = require("uuid/v1");
 
-var browser: puppeteer.Browser;
+const _mapViewEndpoint = process.env.MAPVIEW_WS
+  ? process.env.MAPVIEW_WS
+  : "http://localhost:5000";
+console.log("Webview WS: ", _mapViewEndpoint);
+
+const _browserWSEndpoint = process.env.BROWSER_WS
+  ? process.env.BROWSER_WS
+  : "ws://localhost:3000";
+console.log("Browser WS: ", _browserWSEndpoint);
+
+//var browser: puppeteer.Browser;
 //var page: puppeteer.Page;
 
-async function launch_browser() {
-  browser = await puppeteer.launch({ headless: true });
-}
+async function launch_browser() {}
 
 async function change_url(url: string, filename: string) {
-  const page = await browser.newPage();
-  await page.setViewport({ width: 800, height: 600 });
-  await page.goto(url, { waitUntil: "networkidle0" });
-  await page.waitFor(1500);
-  await page.waitForSelector(".mapboxgl-map");
-  await page.screenshot({
-    path: filename,
-    fullPage: true,
-    type: "jpeg",
-    quality: 75
+  const browser = await puppeteer.connect({
+    browserWSEndpoint: _browserWSEndpoint
   });
-  await page.close();
+
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 800, height: 600 });
+    await page.goto(url, { waitUntil: "networkidle0" });
+    await page.waitFor(1500);
+    await page.waitForSelector(".mapboxgl-map");
+    await page.screenshot({
+      path: filename,
+      fullPage: true,
+      type: "jpeg",
+      quality: 75
+    });
+    browser.close();
+  } catch (error) {
+    console.log({ error }, "Browser error");
+    browser.close();
+    Promise.reject(new Error("Browser error exception"));
+  }
 }
 
 launch_browser();
@@ -32,35 +49,35 @@ const app: express.Application = express();
 
 app.get("/", function(req, res, next) {
   if (req.query) {
-    console.log("query: " + req.query.s);
-    const filename = uuid() + ".jpg";
-    const url = `http://localhost:5000/?query=${req.query.s}`;
+    const query = encodeURIComponent(req.query.s);
+    console.log("downloadable ", req.query.d);
+    const downloadable = req.query.d ? true : false;
+    const filename = "./" + uuid() + ".jpg";
+    const url = `${_mapViewEndpoint}/?query=${query}`;
+    console.log("sending url ", url, downloadable);
     change_url(url, filename)
       .then(() => {
-        const options = {
-          root: "./",
-          dotfiles: "deny",
-          headers: {
-            "x-timestamp": Date.now(),
-            "x-sent": true
-          }
-        };
-        res.download(filename);
-        // res.sendFile(filename, options, function(err) {
-        //   if (err) {
-        //     next(err);
-        //   } else {
-        //     console.log("Sent:", filename);
-        //   }
-        // });
-        //res.send("hello world");
+        if (downloadable) {
+          res.download(filename);
+        } else {
+          const options = {
+            root: "./",
+            dotfiles: "deny",
+            headers: {
+              "x-timestamp": Date.now(),
+              "x-sent": true
+            }
+          };
+          res.sendFile(filename, options);
+        }
       })
       .catch(error => {
+        console.log("error ", error);
         next(error);
       });
   }
 });
 
 app.listen(8030, function() {
-  console.log("Example app listening on port 3000!");
+  console.log("Example app listening on port 8030!");
 });
